@@ -109,9 +109,8 @@ div.task-content {
 }
 
 div.stage-header {
-    border-bottom: solid 1px #C8C8C8;
-    background: #E8E8E8;
-    font-size: 14px;
+    background: #EEEEEE;
+    font-size: 13px;
     font-weight: bold;
     display: table;
     width: 100%;
@@ -119,7 +118,7 @@ div.stage-header {
 }
 
 .stage-name {
-    padding: 3px 3px 3px 6px;
+    padding: 8px 8px 8px 8px;
     display: table-cell;
     vertical-align: top;
 }
@@ -213,6 +212,15 @@ div.task-progress-running {
     }
 }
 
+.status {
+    border-radius: 4px;
+    left: 0;
+    top: 0;
+    border-bottom-width: 0.5px;
+    border-bottom-color: #c8c8c8;
+    border-bottom-style: solid;
+}
+
 .IDLE {
     border-left: 6px solid #d3d3d3;
 }
@@ -247,7 +255,6 @@ div.task-progress-running {
     background-color: #d3d3d3;
     font-weight: bold;
 }
-
 
 .DISABLED {
     border-left: 6px solid transparent;
@@ -304,7 +311,7 @@ div.infoPanelInner {
     border: 0;
 }
 div.infoPanelOuter {
-    margin: 8px;
+    margin: 4px 2px 4px 4px;
     border: 1px solid lightgray;
     background-color: #FAF8F8;
 }
@@ -323,5 +330,3 @@ div.infoPanelOuter {
 .promo-time {
     padding-left: 24px;
 }
-
-

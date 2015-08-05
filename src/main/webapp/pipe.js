@@ -162,7 +162,7 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                             progressClass = "task-progress-running";
                         }
 
-                        html.push("<div id=\"" + id + "\" class=\"stage-task " + task.status.type +
+                        html.push("<div id=\"" + id + "\" class=\"status stage-task " + task.status.type +
                             "\"><div class=\"task-progress " + progressClass + "\" style=\"width: " + progress + "%;\"><div class=\"task-content\">" +
                             "<div class=\"task-header\"><div class=\"taskname\"><a href=\"" + rootURL + "/" + task.link + "\">" + htmlEncode(task.name) + "</a></div>");
                         if (data.allowManualTriggers && task.manual && task.manualStep.enabled && task.manualStep.permission) {
@@ -184,8 +184,7 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                         if (task.status.duration >= 0) {
                             html.push("<div class='duration'>" + formatDuration(task.status.duration) + "</div>");
                         }
-
-                        html.push("</div></div></div></div>");
+                        html.push("</div></div>");
 
                         if(data.showDescription && task.description && task.description != "") {
                             html.push("<div class='infoPanelOuter'>");
@@ -212,9 +211,9 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                             });
                             html.push("</div>");
                         }
+                        html.push("</div></div>");
                     }
-                    html.push("</div>");
-                    html.push('</div>');
+                    html.push("</div></div>");
                     column++;
                 }
 
@@ -455,21 +454,18 @@ function equalheight(container) {
 
         $el = Q(this);
         Q($el).height('auto');
-        topPostion = $el.position().top;
+        topPosition = $el.position().top;
 
         if (currentRowStart != topPostion) {
-            for (currentDiv = 0; currentDiv < rowDivs.length; currentDiv++) {
-                rowDivs[currentDiv].height(currentTallest);
-            }
             rowDivs.length = 0; // empty the array
-            currentRowStart = topPostion;
-            currentTallest = $el.height();
+            currentRowStart = topPosition;
+            currentTallest = $el.height() + 2;
             rowDivs.push($el);
         } else {
             rowDivs.push($el);
-            currentTallest = (currentTallest < $el.height()) ? ($el.height()) : (currentTallest);
+            currentTallest = (currentTallest < $el.height() + 2) ? ($el.height() + 2) : (currentTallest);
         }
-        for (currentDiv = 0; currentDiv < rowDivs.length; currentDiv++) {
+        for (currentDiv = 0; currentDiv < rowDivs.length-1; currentDiv++) {
             rowDivs[currentDiv].height(currentTallest);
         }
     });

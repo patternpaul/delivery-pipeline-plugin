@@ -25,7 +25,6 @@ import hudson.model.Cause;
 import hudson.model.ItemGroup;
 import hudson.model.Items;
 import hudson.util.ListBoxModel;
-import jenkins.model.Jenkins;
 import se.diabol.jenkins.pipeline.RelationshipResolver;
 
 import java.util.ArrayList;
@@ -52,7 +51,7 @@ public final class ProjectUtil {
 
     public static ListBoxModel fillAllProjects(ItemGroup<?> context) {
         ListBoxModel options = new ListBoxModel();
-        for (AbstractProject<?, ?> p : Jenkins.getInstance().getAllItems(AbstractProject.class)) {
+        for (AbstractProject<?, ?> p : JenkinsUtil.getInstance().getAllItems(AbstractProject.class)) {
             options.add(p.getFullDisplayName(), p.getRelativeNameFrom(context));
         }
         return options;
@@ -62,9 +61,9 @@ public final class ProjectUtil {
      * @see se.diabol.jenkins.pipeline.util.ProjectUtil#getAllDownstreamProjects(hudson.model.AbstractProject, java.util.Map)
      *
      */
-    public static Map<String, AbstractProject<?, ?>> getAllDownstreamProjects(AbstractProject first) {
+    public static Map<String, AbstractProject<?, ?>> getAllDownstreamProjects(AbstractProject first, AbstractProject last) {
         Map<String, AbstractProject<?, ?>> projects = newLinkedHashMap();
-        return  getAllDownstreamProjects(first, projects);
+        return  getAllDownstreamProjects(first, last, projects);
     }
 
     /**
@@ -74,23 +73,28 @@ public final class ProjectUtil {
      * a project that already exists will produce a stack overflow.
      *
      * @param first The first project
+     * @param last The last project to visualize
      * @param projects Current map of all sub projects.
      * @return A map of all downstream projects.
      */
-    public static Map<String, AbstractProject<?, ?>> getAllDownstreamProjects(AbstractProject first, Map<String, AbstractProject<?, ?>> projects) {
+    public static Map<String, AbstractProject<?, ?>> getAllDownstreamProjects(AbstractProject first, AbstractProject last, Map<String, AbstractProject<?, ?>> projects) {
         if (first == null) {
             return projects;
         }
 
         if (projects.containsValue(first)) {
-            LOG.warning("Project " + first.getFullDisplayName() + " already exists as a downstream project.");
+            return projects;
+        }
+
+        if (last != null && first.getFullName().equals(last.getFullName())) {
+            projects.put(last.getFullName(), last);
             return projects;
         }
 
         projects.put(first.getFullName(), first);
 
         for (AbstractProject p : getDownstreamProjects(first)) {
-            projects.putAll(getAllDownstreamProjects(p, projects));
+            projects.putAll(getAllDownstreamProjects(p, last, projects));
         }
 
         return projects;
@@ -98,7 +102,7 @@ public final class ProjectUtil {
 
     public static List<AbstractProject> getDownstreamProjects(AbstractProject<?, ?> project) {
         List<AbstractProject> result = new ArrayList<AbstractProject>();
-        List<RelationshipResolver> resolvers= RelationshipResolver.all();
+        List<RelationshipResolver> resolvers = RelationshipResolver.all();
         for (RelationshipResolver resolver : resolvers) {
             result.addAll(resolver.getDownstreamProjects(project));
         }
@@ -106,14 +110,14 @@ public final class ProjectUtil {
     }
 
     public static AbstractProject<?, ?> getProject(String name, ItemGroup context) {
-        return Jenkins.getInstance().getItem(name, context, AbstractProject.class);
+        return JenkinsUtil.getInstance().getItem(name, context, AbstractProject.class);
     }
 
     public static Map<String, AbstractProject> getProjects(String regExp) {
         try {
             Pattern pattern = Pattern.compile(regExp);
             Map<String, AbstractProject> result = new HashMap<String, AbstractProject>();
-            for (AbstractProject<?, ?> project : Jenkins.getInstance().getAllItems(AbstractProject.class)) {
+            for (AbstractProject<?, ?> project : JenkinsUtil.getInstance().getAllItems(AbstractProject.class)) {
                 Matcher matcher = pattern.matcher(project.getFullName());
                 if (matcher.find()) {
                     if (matcher.groupCount() >= 1) {
@@ -137,12 +141,13 @@ public final class ProjectUtil {
                 return true;
             } else {
                 List<Cause.UpstreamCause> causes = Util.filter(project.getQueueItem().getCauses(), Cause.UpstreamCause.class);
+                @SuppressWarnings("unchecked")
                 List<AbstractProject<?,?>> upstreamProjects = project.getUpstreamProjects();
                 for (AbstractProject<?, ?> upstreamProject : upstreamProjects) {
                     AbstractBuild upstreamBuild = BuildUtil.match(upstreamProject.getBuilds(), firstBuild);
                     if (upstreamBuild != null) {
                         for (Cause.UpstreamCause upstreamCause : causes) {
-                            if (upstreamBuild.getNumber() == upstreamCause.getUpstreamBuild() && upstreamProject.getRelativeNameFrom(Jenkins.getInstance()).equals(upstreamCause.getUpstreamProject())) {
+                            if (upstreamBuild.getNumber() == upstreamCause.getUpstreamBuild() && upstreamProject.getRelativeNameFrom(JenkinsUtil.getInstance()).equals(upstreamCause.getUpstreamProject())) {
                                 return true;
                             }
 

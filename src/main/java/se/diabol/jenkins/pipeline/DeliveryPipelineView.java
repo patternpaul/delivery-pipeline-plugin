@@ -19,23 +19,40 @@ package se.diabol.jenkins.pipeline;
 
 import hudson.DescriptorExtensionList;
 import hudson.Extension;
-import hudson.model.AbstractBuild;
 import hudson.model.AbstractDescribableImpl;
+import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.TopLevelItem;
+import hudson.model.ViewGroup;
+import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.Api;
 import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Descriptor;
-import hudson.model.Item;
-import hudson.model.ItemGroup;
 import hudson.model.ParametersAction;
-import hudson.model.TopLevelItem;
 import hudson.model.View;
 import hudson.model.ViewDescriptor;
-import hudson.model.ViewGroup;
+import hudson.model.listeners.ItemListener;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
+import javax.servlet.ServletException;
+
 import jenkins.model.Jenkins;
+
 import org.acegisecurity.AuthenticationException;
 import org.acegisecurity.BadCredentialsException;
 import org.kohsuke.stapler.AncestorInPath;
@@ -45,6 +62,7 @@ import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 import org.kohsuke.stapler.bind.JavaScriptMethod;
 import org.kohsuke.stapler.export.Exported;
+
 import se.diabol.jenkins.pipeline.domain.Component;
 import se.diabol.jenkins.pipeline.domain.Pipeline;
 import se.diabol.jenkins.pipeline.domain.PipelineException;
@@ -53,25 +71,10 @@ import se.diabol.jenkins.pipeline.sort.ComponentComparatorDescriptor;
 import se.diabol.jenkins.pipeline.trigger.ManualTrigger;
 import se.diabol.jenkins.pipeline.trigger.ManualTriggerFactory;
 import se.diabol.jenkins.pipeline.trigger.TriggerException;
+import se.diabol.jenkins.pipeline.util.JenkinsUtil;
 import se.diabol.jenkins.pipeline.util.PipelineUtils;
 import se.diabol.jenkins.pipeline.util.ProjectUtil;
 
-import javax.servlet.ServletException;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
-
-@SuppressWarnings("UnusedDeclaration")
 public class DeliveryPipelineView extends View {
 
     private static final Logger LOG = Logger.getLogger(DeliveryPipelineView.class.getName());
@@ -95,8 +98,13 @@ public class DeliveryPipelineView extends View {
     private int updateInterval = DEFAULT_INTERVAL;
     private boolean showChanges = false;
     private boolean allowManualTriggers = false;
+    private boolean showTotalBuildTime = false;
     private boolean allowRebuild = false;
     private boolean allowPipelineStart = false;
+    private boolean showDescription = false;
+    private boolean showPromotions = false;
+    private boolean showTestResults = false;
+    private boolean showStaticAnalysisResults = false;
 
     private List<RegExpSpec> regexpFirstJobs;
 
@@ -144,8 +152,6 @@ public class DeliveryPipelineView extends View {
         }
     }
 
-
-
     public List<ComponentSpec> getComponentSpecs() {
         return componentSpecs;
     }
@@ -172,6 +178,15 @@ public class DeliveryPipelineView extends View {
 
     public void setShowChanges(boolean showChanges) {
         this.showChanges = showChanges;
+    }
+
+    @Exported
+    public boolean isShowTotalBuildTime() {
+        return showTotalBuildTime;
+    }
+
+    public void setShowTotalBuildTime(boolean showTotalBuildTime) {
+        this.showTotalBuildTime = showTotalBuildTime;
     }
 
     public void setShowAggregatedPipeline(boolean showAggregatedPipeline) {
@@ -242,8 +257,7 @@ public class DeliveryPipelineView extends View {
         }
     }
 
-    @Override
-    public void onJobRenamed(Item item, String oldName, String newName) {
+    public void onProjectRenamed(Item item, String oldName, String newName) {
         if (componentSpecs != null) {
             Iterator<ComponentSpec> it = componentSpecs.iterator();
             while (it.hasNext()) {
@@ -253,6 +267,13 @@ public class DeliveryPipelineView extends View {
                         it.remove();
                     } else {
                         componentSpec.setFirstJob(newName);
+                    }
+                }
+                if (componentSpec.getLastJob() != null && componentSpec.getLastJob().equals(oldName)) {
+                    if (newName == null) {
+                        it.remove();
+                    } else {
+                        componentSpec.setLastJob(newName);
                     }
                 }
             }
@@ -289,6 +310,44 @@ public class DeliveryPipelineView extends View {
         this.allowRebuild = allowRebuild;
     }
 
+    @Exported
+    public boolean isShowDescription()
+    {
+        return showDescription;
+    }
+
+    @Exported
+    public boolean isShowPromotions() {
+        return showPromotions;
+    }
+
+    @Exported
+    public boolean isShowTestResults() {
+        return showTestResults;
+    }
+
+    @Exported
+    public boolean isShowStaticAnalysisResults() {
+        return showStaticAnalysisResults;
+    }
+
+    public void setShowDescription(boolean showDescription)
+    {
+        this.showDescription = showDescription;
+    }
+
+    public void setShowPromotions(boolean showPromotions) {
+        this.showPromotions = showPromotions;
+    }
+
+    public void setShowTestResults(boolean showTestResults) {
+        this.showTestResults = showTestResults;
+    }
+
+    public void setShowStaticAnalysisResults(boolean showStaticAnalysisResults) {
+        this.showStaticAnalysisResults = showStaticAnalysisResults;
+    }
+
     @JavaScriptMethod
     public void triggerManual(String projectName, String upstreamName, String buildId) throws TriggerException, AuthenticationException {
         try {
@@ -320,6 +379,7 @@ public class DeliveryPipelineView extends View {
         }
         AbstractBuild build = project.getBuildByNumber(Integer.parseInt(buildId));
 
+        @SuppressWarnings("unchecked")
         List<Cause> prevCauses = build.getCauses();
         CauseAction causeAction = new CauseAction();
         for (Cause cause : prevCauses) {
@@ -351,8 +411,9 @@ public class DeliveryPipelineView extends View {
             if (componentSpecs != null) {
                 for (ComponentSpec componentSpec : componentSpecs) {
                     AbstractProject firstJob = ProjectUtil.getProject(componentSpec.getFirstJob(), getOwnerItemGroup());
+                    AbstractProject lastJob = ProjectUtil.getProject(componentSpec.getLastJob(), getOwnerItemGroup());
                     if (firstJob != null) {
-                        components.add(getComponent(componentSpec.getName(), firstJob, showAggregatedPipeline));
+                        components.add(getComponent(componentSpec.getName(), firstJob, lastJob, showAggregatedPipeline));
                     } else {
                         throw new PipelineException("Could not find project: " + componentSpec.getFirstJob());
                     }
@@ -362,7 +423,7 @@ public class DeliveryPipelineView extends View {
                 for (RegExpSpec regexp : regexpFirstJobs) {
                     Map<String, AbstractProject> matches = ProjectUtil.getProjects(regexp.getRegexp());
                     for (Map.Entry<String, AbstractProject> entry : matches.entrySet()) {
-                        components.add(getComponent(entry.getKey(), entry.getValue(), showAggregatedPipeline));
+                        components.add(getComponent(entry.getKey(), entry.getValue(), null, showAggregatedPipeline));
                     }
                 }
             }
@@ -381,40 +442,19 @@ public class DeliveryPipelineView extends View {
         }
     }
 
-    private Component getComponent(String name, AbstractProject firstJob, boolean showAggregatedPipeline) throws PipelineException {
-        Pipeline pipeline = Pipeline.extractPipeline(name, firstJob);
+    private Component getComponent(String name, AbstractProject firstJob, AbstractProject lastJob, boolean showAggregatedPipeline) throws PipelineException {
+        Pipeline pipeline = Pipeline.extractPipeline(name, firstJob, lastJob);
         List<Pipeline> pipelines = new ArrayList<Pipeline>();
         if (showAggregatedPipeline) {
             pipelines.add(pipeline.createPipelineAggregated(getOwnerItemGroup()));
         }
         pipelines.addAll(pipeline.createPipelineLatest(noOfPipelines, getOwnerItemGroup()));
-        return new Component(name, firstJob.getName(), firstJob.getUrl(), pipelines);
+        return new Component(name, firstJob.getName(), firstJob.getUrl(), firstJob.isParameterized(), pipelines);
     }
 
     @Override
     public Collection<TopLevelItem> getItems() {
-        List<TopLevelItem> result = new ArrayList<TopLevelItem>();
-        Set<AbstractProject> projects = new HashSet<AbstractProject>();
-        if (componentSpecs != null) {
-            for (ComponentSpec componentSpec : componentSpecs) {
-                projects.add(ProjectUtil.getProject(componentSpec.getFirstJob(), getOwnerItemGroup()));
-            }
-        }
-        if (regexpFirstJobs != null) {
-            for (RegExpSpec regexp : regexpFirstJobs) {
-                Map<String, AbstractProject> projectMap = ProjectUtil.getProjects(regexp.getRegexp());
-                projects.addAll(projectMap.values());
-            }
-
-        }
-        for (AbstractProject project : projects) {
-            Collection<AbstractProject<?, ?>> downstreamProjects = ProjectUtil.getAllDownstreamProjects(project).values();
-            for (AbstractProject<?, ?> abstractProject : downstreamProjects) {
-                result.add(getItem(abstractProject.getName()));
-            }
-        }
-
-        return result;
+        return (Collection)getOwnerItemGroup().getItems();
     }
 
     @Override
@@ -432,12 +472,10 @@ public class DeliveryPipelineView extends View {
 
     @Override
     public Item doCreateItem(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
-        View allView;
-        
         if (!isDefault()) {
             return getOwner().getPrimaryView().doCreateItem(req, rsp);
         } else {
-            return Jenkins.getInstance().doCreateItem(req, rsp);
+            return JenkinsUtil.getInstance().doCreateItem(req, rsp);
         }
     }
 
@@ -517,8 +555,10 @@ public class DeliveryPipelineView extends View {
                         Pattern pattern = Pattern.compile(value);
                         if (pattern.matcher("").groupCount() == 1) {
                             return FormValidation.ok();
-                        } else {
+                        } else if (pattern.matcher("").groupCount() == 0) {
                             return FormValidation.error("No capture group defined");
+                        } else {
+                            return FormValidation.error("Too many capture groups defined");
                         }
                     } catch (PatternSyntaxException e) {
                         return FormValidation.error(e, "Syntax error in regular-expression pattern");
@@ -532,11 +572,13 @@ public class DeliveryPipelineView extends View {
     public static class ComponentSpec extends AbstractDescribableImpl<ComponentSpec> {
         private String name;
         private String firstJob;
+        private String lastJob;
 
         @DataBoundConstructor
-        public ComponentSpec(String name, String firstJob) {
+        public ComponentSpec(String name, String firstJob, String lastJob) {
             this.name = name;
             this.firstJob = firstJob;
+            this.lastJob = lastJob;
         }
 
         public String getName() {
@@ -551,6 +593,14 @@ public class DeliveryPipelineView extends View {
             this.firstJob = firstJob;
         }
 
+        public String getLastJob() {
+            return lastJob;
+        }
+
+        public void setLastJob(String lastJob) {
+            this.lastJob = lastJob;
+        }
+
         @Extension
         public static class DescriptorImpl extends Descriptor<ComponentSpec> {
 
@@ -563,6 +613,13 @@ public class DeliveryPipelineView extends View {
                 return ProjectUtil.fillAllProjects(context);
             }
 
+            public ListBoxModel doFillLastJobItems(@AncestorInPath ItemGroup<?> context) {
+                ListBoxModel options = new ListBoxModel();
+                options.add("");
+                options.addAll(ProjectUtil.fillAllProjects(context));
+                return options;
+            }
+
             public FormValidation doCheckName(@QueryParameter String value) {
                 if (value != null && !"".equals(value.trim())) {
                     return FormValidation.ok();
@@ -573,4 +630,32 @@ public class DeliveryPipelineView extends View {
 
         }
     }
+
+
+    @Extension
+    public static class ItemListenerImpl extends ItemListener {
+
+        @Override
+        public void onRenamed(Item item, String oldName, String newName) {
+            notifyView(item, oldName, newName);
+        }
+
+        @Override
+        public void onDeleted(Item item) {
+            notifyView(item, item.getFullName(), null);
+        }
+
+
+        private void notifyView(Item item, String oldName, String newName) {
+            Collection<View> views = JenkinsUtil.getInstance().getViews();
+            for (View view : views) {
+                if (view instanceof DeliveryPipelineView) {
+                    ((DeliveryPipelineView) view).onProjectRenamed(item, oldName, newName);
+                }
+            }
+        }
+
+
+    }
+
 }

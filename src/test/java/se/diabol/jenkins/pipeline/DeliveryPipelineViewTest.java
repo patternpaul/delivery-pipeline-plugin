@@ -17,28 +17,40 @@ If not, see <http://www.gnu.org/licenses/>.
 */
 package se.diabol.jenkins.pipeline;
 
-import au.com.centrumsystems.hudson.plugin.buildpipeline.trigger.BuildPipelineTrigger;
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import hudson.model.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import hudson.model.TopLevelItem;
+import hudson.model.AbstractBuild;
+import hudson.model.Api;
+import hudson.model.FreeStyleProject;
+import hudson.model.ParametersAction;
+import hudson.model.ParametersDefinitionProperty;
+import hudson.model.StringParameterDefinition;
+import hudson.model.User;
 import hudson.plugins.parameterizedtrigger.AbstractBuildParameterFactory;
 import hudson.plugins.parameterizedtrigger.BuildTriggerConfig;
 import hudson.plugins.parameterizedtrigger.PredefinedBuildParameters;
 import hudson.plugins.parameterizedtrigger.ResultCondition;
 import hudson.security.ACL;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.security.Permission;
+import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.tasks.BuildTrigger;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
+
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
 import net.sf.json.JSONObject;
-
-import static org.junit.Assert.*;
 
 import org.acegisecurity.AuthenticationException;
 import org.acegisecurity.context.SecurityContext;
@@ -53,29 +65,61 @@ import org.jvnet.hudson.test.MockFolder;
 import org.jvnet.hudson.test.WithoutJenkins;
 import org.kohsuke.stapler.StaplerRequest;
 import org.mockito.Mockito;
-import static org.mockito.Mockito.*;
 import org.mockito.runners.MockitoJUnitRunner;
-import se.diabol.jenkins.pipeline.domain.*;
+
+import se.diabol.jenkins.pipeline.domain.Component;
+import se.diabol.jenkins.pipeline.domain.Pipeline;
+import se.diabol.jenkins.pipeline.domain.Stage;
+import se.diabol.jenkins.pipeline.domain.task.Task;
 import se.diabol.jenkins.pipeline.sort.NameComparator;
 import se.diabol.jenkins.pipeline.trigger.TriggerException;
+import au.com.centrumsystems.hudson.plugin.buildpipeline.trigger.BuildPipelineTrigger;
+
+import com.gargoylesoftware.htmlunit.html.HtmlForm;
+import com.gargoylesoftware.htmlunit.html.HtmlPage;
 
 @RunWith(MockitoJUnitRunner.class)
 public class DeliveryPipelineViewTest {
 
     @Rule
     public JenkinsRule jenkins = new JenkinsRule();
+    private final static String NONE = null;
 
     @Test
-    @WithoutJenkins
-    public void testOnJobRenamed() {
+    public void testOnJobRenamed() throws Exception {
+
+        FreeStyleProject p1 = jenkins.createFreeStyleProject("build1");
+
         List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp1", "build1"));
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp2", "build2"));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp1", "build1", NONE));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp2", "build2", NONE));
 
         DeliveryPipelineView view = new DeliveryPipelineView("Test");
         view.setComponentSpecs(componentSpecs);
-        view.onJobRenamed(null, "build1", "newbuild");
+        jenkins.getInstance().addView(view);
+
+        p1.renameTo("newbuild");
+
         assertEquals("newbuild", view.getComponentSpecs().get(0).getFirstJob());
+    }
+
+    @Test
+    public void testOnLastJobRenamed() throws Exception {
+
+        FreeStyleProject p2 = jenkins.createFreeStyleProject("build2");
+
+        List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp1", "build1", "build2"));
+
+        DeliveryPipelineView view = new DeliveryPipelineView("Test");
+        view.setComponentSpecs(componentSpecs);
+        jenkins.getInstance().addView(view);
+
+        p2.renameTo("newbuild");
+        assertEquals("newbuild", view.getComponentSpecs().get(0).getLastJob());
+
+        p2.delete();
+        assertEquals(0, view.getComponentSpecs().size());
     }
 
     @Test
@@ -84,27 +128,31 @@ public class DeliveryPipelineViewTest {
     public void testOnJobRenamedNoComponentSpecs() {
         DeliveryPipelineView view = new DeliveryPipelineView("Test");
         //Rename
-        view.onJobRenamed(null, "build1", "newbuild");
+        view.onProjectRenamed(null, "build1", "newbuild");
         //Delete
-        view.onJobRenamed(null, "build1", null);
+        view.onProjectRenamed(null, "build1", null);
     }
 
 
     @Test
-    @WithoutJenkins
-    public void testOnJobRenamedDelete() {
-        List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp1", "build1"));
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp2", "build2"));
+    public void testOnJobRenamedDelete() throws Exception {
 
+        FreeStyleProject p1 = jenkins.createFreeStyleProject("build1");
+
+        List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp1", "build1", NONE));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("comp2", "build2", NONE));
 
         DeliveryPipelineView view = new DeliveryPipelineView("Test");
         view.setComponentSpecs(componentSpecs);
+
+        jenkins.getInstance().addView(view);
+
         assertEquals(2, view.getComponentSpecs().size());
-        view.onJobRenamed(null, "build1", null);
+
+        p1.delete();
 
         assertEquals(1, view.getComponentSpecs().size());
-
     }
 
     @Test
@@ -122,6 +170,7 @@ public class DeliveryPipelineViewTest {
 
     @Test
     @WithoutJenkins
+    @SuppressWarnings("all")
     public void testDoCheckUpdateInterval() {
         DeliveryPipelineView.DescriptorImpl d = new DeliveryPipelineView.DescriptorImpl();
         assertEquals(FormValidation.Kind.ERROR, d.doCheckUpdateInterval("").kind);
@@ -147,7 +196,12 @@ public class DeliveryPipelineViewTest {
         assertFalse(view.getShowAvatars());
         assertFalse(view.isShowChanges());
         assertFalse(view.isAllowManualTriggers());
+        assertFalse(view.isShowTotalBuildTime());
         assertFalse(view.isAllowRebuild());
+        assertFalse(view.isShowDescription());
+        assertFalse(view.isShowPromotions());
+        assertFalse(view.isShowTestResults());
+        assertFalse(view.isShowStaticAnalysisResults());
     }
 
     @Test
@@ -169,9 +223,18 @@ public class DeliveryPipelineViewTest {
         assertNotNull(view.getLastUpdated());
         view.setAllowManualTriggers(true);
         assertTrue(view.isAllowManualTriggers());
+        view.setShowTotalBuildTime(true);
+        assertTrue(view.isShowTotalBuildTime());
         view.setAllowRebuild(true);
         assertTrue(view.isAllowRebuild());
-
+        view.setShowDescription(true);
+        assertTrue(view.isShowDescription());
+        view.setShowPromotions(true);
+        assertTrue(view.isShowPromotions());
+        view.setShowTestResults(true);
+        assertTrue(view.isShowTestResults());
+        view.setShowStaticAnalysisResults(true);
+        assertTrue(view.isShowStaticAnalysisResults());
     }
 
     @Test
@@ -218,7 +281,7 @@ public class DeliveryPipelineViewTest {
 
 
         List<DeliveryPipelineView.ComponentSpec> specs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build"));
+        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build", NONE));
         DeliveryPipelineView view = new DeliveryPipelineView("name");
         view.setComponentSpecs(specs);
         jenkins.getInstance().addView(view);
@@ -235,7 +298,7 @@ public class DeliveryPipelineViewTest {
     @Test
     public void testGetItemsGetPipelinesWhenNoProjectFound() throws Exception {
         List<DeliveryPipelineView.ComponentSpec> specs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build"));
+        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build", NONE));
         DeliveryPipelineView view = new DeliveryPipelineView("name");
         view.setComponentSpecs(specs);
         jenkins.getInstance().addView(view);
@@ -265,7 +328,7 @@ public class DeliveryPipelineViewTest {
 
 
         List<DeliveryPipelineView.ComponentSpec> specs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build"));
+        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build", NONE));
         DeliveryPipelineView view = new DeliveryPipelineView("name");
         view.setComponentSpecs(specs);
         folder.addView(view);
@@ -279,13 +342,35 @@ public class DeliveryPipelineViewTest {
 
     }
 
+    @Test
+    public void testGetPipelineViewWithLastJobProvided() throws Exception {
+        FreeStyleProject build = jenkins.createFreeStyleProject("build");
+        FreeStyleProject test = jenkins.createFreeStyleProject("test");
+        FreeStyleProject deploy = jenkins.createFreeStyleProject("deploy");
+
+        build.getPublishersList().add(new BuildTrigger(test.getName(), false));
+        test.getPublishersList().add(new BuildTrigger(deploy.getName(), false));
+
+        jenkins.getInstance().rebuildDependencyGraph();
+        jenkins.buildAndAssertSuccess(build);
+        jenkins.waitUntilNoActivity();
+
+        List<DeliveryPipelineView.ComponentSpec> specs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
+        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build", "test"));
+        DeliveryPipelineView view = new DeliveryPipelineView("Pipeline");
+        view.setComponentSpecs(specs);
+        view.setSorting(NameComparator.class.getName());
+        jenkins.getInstance().addView(view);
+        view.getPipelines();
+        assertNull(view.getError());
+    }
 
     @Test
     public void testGetPipelines() throws Exception {
         FreeStyleProject build = jenkins.createFreeStyleProject("build");
-        build.addProperty(new PipelineProperty("Build", "BuildStage"));
+        build.addProperty(new PipelineProperty("Build", "BuildStage", ""));
         List<DeliveryPipelineView.ComponentSpec> specs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build"));
+        specs.add(new DeliveryPipelineView.ComponentSpec("Comp", "build", NONE));
         DeliveryPipelineView view = new DeliveryPipelineView("Pipeline");
         view.setComponentSpecs(specs);
         view.setSorting(NameComparator.class.getName());
@@ -322,8 +407,7 @@ public class DeliveryPipelineViewTest {
         assertEquals("Build", task.getName());
         assertEquals("build", task.getId());
         assertEquals("1", task.getBuildId());
-        assertNull(task.getTestResult());
-
+        assertEquals(0, task.getTestResults().size());
 
         view.setShowAggregatedPipeline(true);
         components = view.getPipelines();
@@ -332,8 +416,6 @@ public class DeliveryPipelineViewTest {
         component = components.get(0);
         assertEquals(2, component.getPipelines().size());
         assertEquals("Comp", component.getName());
-
-
 
         pipeline = component.getPipelines().get(0);
         assertNull(pipeline.getVersion());
@@ -344,8 +426,6 @@ public class DeliveryPipelineViewTest {
         assertEquals(1, pipeline.getStages().size());
         assertNull(pipeline.getChanges());
 
-
-
         pipeline = component.getPipelines().get(1);
         assertEquals("#1", pipeline.getVersion());
         assertNotNull(pipeline.getTimestamp());
@@ -354,31 +434,29 @@ public class DeliveryPipelineViewTest {
         assertEquals(0, pipeline.getContributors().size());
         assertEquals(1, pipeline.getStages().size());
         assertEquals(0, pipeline.getChanges().size());
-
-
-
     }
 
     @Test
     @WithoutJenkins
+    @SuppressWarnings("all")
     public void testDoCheckName() {
         DeliveryPipelineView.ComponentSpec.DescriptorImpl d = new DeliveryPipelineView.ComponentSpec.DescriptorImpl();
         assertEquals(FormValidation.Kind.ERROR,  d.doCheckName(null).kind);
         assertEquals(FormValidation.Kind.ERROR,  d.doCheckName("").kind);
         assertEquals(FormValidation.Kind.ERROR,  d.doCheckName(" ").kind);
         assertEquals(FormValidation.Kind.OK,  d.doCheckName("Component").kind);
-
-
     }
 
     @Test
     @WithoutJenkins
+    @SuppressWarnings("all")
     public void testDoCheckRegexpFirstJob() {
         DeliveryPipelineView.RegExpSpec.DescriptorImpl d = new DeliveryPipelineView.RegExpSpec.DescriptorImpl();
         assertEquals(FormValidation.Kind.OK, d.doCheckRegexp(null).kind);
         assertEquals(FormValidation.Kind.ERROR, d.doCheckRegexp("*").kind);
         assertEquals(FormValidation.Kind.ERROR, d.doCheckRegexp("^build-.+?-project").kind);
         assertEquals(FormValidation.Kind.OK, d.doCheckRegexp("^build-(.+?)-project").kind);
+        assertEquals(FormValidation.Kind.ERROR, d.doCheckRegexp("^build-(.+?)-(project)").kind);
     }
 
     @Test
@@ -399,7 +477,6 @@ public class DeliveryPipelineViewTest {
         assertNull(view.getFullScreenCss());
         view.setFullScreenCss("http://somewhere.com");
         assertEquals("http://somewhere.com", view.getFullScreenCss());
-
     }
 
     @Test
@@ -412,7 +489,6 @@ public class DeliveryPipelineViewTest {
         assertNull(view.getEmbeddedCss());
         view.setEmbeddedCss("http://somewhere.com");
         assertEquals("http://somewhere.com", view.getEmbeddedCss());
-
     }
 
     @Test
@@ -434,6 +510,18 @@ public class DeliveryPipelineViewTest {
         ListBoxModel model = new DeliveryPipelineView.DescriptorImpl().doFillNoOfColumnsItems(jenkins.getInstance());
         assertNotNull(model);
         assertTrue(model.size() != 0);
+    }
+
+    @Test
+    public void testDoFillFirstJobItems() {
+        ListBoxModel model = new DeliveryPipelineView.ComponentSpec.DescriptorImpl().doFillFirstJobItems(jenkins.getInstance());
+        assertNotNull(model);
+    }
+
+    @Test
+    public void testDoFillLastJobItems() {
+        ListBoxModel model = new DeliveryPipelineView.ComponentSpec.DescriptorImpl().doFillLastJobItems(jenkins.getInstance());
+        assertNotNull(model);
     }
 
     @Test
@@ -467,7 +555,7 @@ public class DeliveryPipelineViewTest {
         assertTrue(names.contains("Project2"));
         assertTrue(names.contains("Project3"));
 
-        assertEquals(3, view.getItems().size());
+        assertEquals(4, view.getItems().size());
     }
 
     @Test
@@ -508,11 +596,11 @@ public class DeliveryPipelineViewTest {
         testDoCreateItem("testDoCreateItem", "");
 
         DeliveryPipelineView view = new DeliveryPipelineView("Delivery Pipeline");
-        jenkins.hudson.addView(view);
+        jenkins.getInstance().addView(view);
         
         testDoCreateItem("testDoCreateItemAsTheDefaultViewFromTheViewUrl", "view/Delivery%20Pipeline/");
 
-        jenkins.hudson.setPrimaryView(view);
+        jenkins.getInstance().setPrimaryView(view);
         testDoCreateItem("testDoCreateItemAsTheDefaultView", "");
     }
 
@@ -593,13 +681,13 @@ public class DeliveryPipelineViewTest {
     public void testRecursiveStages() throws Exception {
 
         FreeStyleProject a = jenkins.createFreeStyleProject("A");
-        a.addProperty(new PipelineProperty("A", "A"));
+        a.addProperty(new PipelineProperty("A", "A", ""));
         FreeStyleProject b = jenkins.createFreeStyleProject("B");
-        b.addProperty(new PipelineProperty("B", "B"));
+        b.addProperty(new PipelineProperty("B", "B", ""));
         FreeStyleProject c = jenkins.createFreeStyleProject("C");
-        c.addProperty(new PipelineProperty("C", "C"));
+        c.addProperty(new PipelineProperty("C", "C", ""));
         FreeStyleProject d = jenkins.createFreeStyleProject("D");
-        d.addProperty(new PipelineProperty("D", "B"));
+        d.addProperty(new PipelineProperty("D", "B", ""));
 
         a.getPublishersList().add(new hudson.plugins.parameterizedtrigger.BuildTrigger(new BuildTriggerConfig("B", ResultCondition.SUCCESS, new ArrayList<AbstractBuildParameterFactory>())));
         b.getPublishersList().add(new hudson.plugins.parameterizedtrigger.BuildTrigger(new BuildTriggerConfig("C", ResultCondition.SUCCESS, new ArrayList<AbstractBuildParameterFactory>())));
@@ -609,7 +697,7 @@ public class DeliveryPipelineViewTest {
 
         DeliveryPipelineView view = new DeliveryPipelineView("Pipeline");
         List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp", "A"));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp", "A", NONE));
         view.setComponentSpecs(componentSpecs);
 
         jenkins.getInstance().addView(view);
@@ -630,8 +718,8 @@ public class DeliveryPipelineViewTest {
 
         DeliveryPipelineView view = new DeliveryPipelineView("Pipeline");
         List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp2", "A"));
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp1", "B"));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp2", "A", NONE));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp1", "B", NONE));
         view.setComponentSpecs(componentSpecs);
         view.setShowAggregatedPipeline(true);
         view.setSorting("this will not be found");
@@ -648,8 +736,6 @@ public class DeliveryPipelineViewTest {
         assertEquals(2, components.size());
         assertEquals("Comp2", components.get(0).getName());
         assertEquals("Comp1", components.get(1).getName());
-
-
     }
 
     @Test
@@ -659,8 +745,8 @@ public class DeliveryPipelineViewTest {
 
         DeliveryPipelineView view = new DeliveryPipelineView("Pipeline");
         List<DeliveryPipelineView.ComponentSpec> componentSpecs = new ArrayList<DeliveryPipelineView.ComponentSpec>();
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp2", "A"));
-        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp1", "B"));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp2", "A", NONE));
+        componentSpecs.add(new DeliveryPipelineView.ComponentSpec("Comp1", "B", NONE));
         view.setComponentSpecs(componentSpecs);
         view.setShowAggregatedPipeline(true);
         view.setSorting("none");
@@ -693,15 +779,12 @@ public class DeliveryPipelineViewTest {
         assertNotNull(a.getLastBuild());
         assertNotNull(b.getLastBuild());
 
-        AbstractBuild b1 = b.getLastBuild();
+        AbstractBuild<?, ?> b1 = b.getLastBuild();
 
         view.triggerRebuild("B", "1");
         jenkins.waitUntilNoActivity();
         assertEquals(2, b.getLastBuild().getNumber());
         assertEqualsList(b1.getActions(ParametersAction.class), b.getLastBuild().getActions(ParametersAction.class));
-
-
-
     }
 
     @Test
@@ -727,6 +810,12 @@ public class DeliveryPipelineViewTest {
             //Should throw this
         }
         SecurityContextHolder.setContext(oldContext);
+    }
+
+    @Test
+    public void testComponentSpecDescriptorImpldoFillFirstJobItems() throws Exception {
+        jenkins.createFreeStyleProject("a");
+        assertEquals(1, new DeliveryPipelineView.ComponentSpec.DescriptorImpl().doFillFirstJobItems(jenkins.getInstance()).size());
     }
 
     private void assertEqualsList(List<ParametersAction> a1, List<ParametersAction> a2) {

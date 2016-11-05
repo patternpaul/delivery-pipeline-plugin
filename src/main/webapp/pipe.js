@@ -55,7 +55,11 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
             html.push("<section class='pipeline-component'>");
             html.push("<h1>" + htmlEncode(component.name));
             if (data.allowPipelineStart) {
-                html.push('&nbsp;<a id=\'startpipeline-' + c  +'\' class="task-icon-link" href="#" onclick="triggerBuild(\'' + component.firstJobUrl + '\', \'' + data.name + '\');">');
+                if (component.firstJobParameterized) {
+                    html.push('&nbsp;<a id=\'startpipeline-' + c  +'\' class="task-icon-link" href="#" onclick="triggerParameterizedBuild(\'' + component.firstJobUrl + '\', \'' + data.name + '\');">');
+                } else {
+                    html.push('&nbsp;<a id=\'startpipeline-' + c  +'\' class="task-icon-link" href="#" onclick="triggerBuild(\'' + component.firstJobUrl + '\', \'' + data.name + '\');">');
+                }
                 html.push('<img class="icon-clock icon-md" title="Build now" src="' + resURL + '/images/24x24/clock.png">');
                 html.push("</a>");
             }
@@ -99,6 +103,10 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                     }
 
                     html.push(' started <span id="' + pipeline.id + '\">' + formatDate(pipeline.timestamp, lastUpdate) + '</span></h2>');
+
+                    if (data.showTotalBuildTime) {
+                        html.push('<h3>Total build time: ' + formatDuration(pipeline.totalBuildTime) + '</h3>');
+                    }
 
                     if (showChanges && pipeline.changes && pipeline.changes.length > 0) {
                         html.push(generateChangeLog(pipeline.changes));
@@ -158,15 +166,15 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                             progressClass = "task-progress-running";
                         }
 
-                        html.push("<div id=\"" + id + "\" class=\"stage-task " + task.status.type +
+                        html.push("<div id=\"" + id + "\" class=\"status stage-task " + task.status.type +
                             "\"><div class=\"task-progress " + progressClass + "\" style=\"width: " + progress + "%;\"><div class=\"task-content\">" +
                             "<div class=\"task-header\"><div class=\"taskname\"><a href=\"" + rootURL + "/" + task.link + "\">" + htmlEncode(task.name) + "</a></div>");
                         if (data.allowManualTriggers && task.manual && task.manualStep.enabled && task.manualStep.permission) {
-                            html.push('<div class="task-manual" id="manual-' + id + '" onclick="triggerManual(\'' + id + '\', \'' + task.id + '\', \'' + task.manualStep.upstreamProject + '\', \'' + task.manualStep.upstreamId + '\');">');
+                            html.push('<div class="task-manual" id="manual-' + id + '" title="Trigger manual build" onclick="triggerManual(\'' + id + '\', \'' + task.id + '\', \'' + task.manualStep.upstreamProject + '\', \'' + task.manualStep.upstreamId + '\');">');
                             html.push("</div>");
                         } else {
                             if (!pipeline.aggregated && data.allowRebuild && task.rebuildable) {
-                                html.push('<div class="task-rebuild" id="rebuild-' + id + '" onclick="triggerRebuild(\'' + id + '\', \'' + task.id + '\', \'' + task.buildId + '\');">');
+                                html.push('<div class="task-rebuild" id="rebuild-' + id + '" title="Trigger rebuild" onclick="triggerRebuild(\'' + id + '\', \'' + task.id + '\', \'' + task.buildId + '\');">');
                                 html.push("</div>");
                             }
                         }
@@ -183,9 +191,13 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
 
                         html.push("</div></div></div></div>");
 
+                        html.push(generateDescription(data, task));
+                        html.push(generateTestInfo(data, task));
+                        html.push(generateStaticAnalysisInfo(data, task));
+                        html.push(generatePromotionsInfo(data, task));
+
                     }
-                    html.push("</div>");
-                    html.push('</div>');
+                    html.push("</div></div>");
                     column++;
                 }
 
@@ -215,7 +227,7 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
                             plumb.connect({
                                 source: source,
                                 target: target,
-                                anchors: ["RightMiddle", "LeftMiddle"],
+                                anchors: [[1, 0, 1, 0, 0, 37], [0, 0, -1, 0, 0, 37]], // allow boxes to increase in height but keep anchor lines on the top
                                 overlays: [
                                     [ "Arrow", { location: 1}]
                                 ],
@@ -258,18 +270,117 @@ function refreshPipelines(data, divNames, errorDiv, view, showAvatars, showChang
     plumb.repaintEverything();
 }
 
+function generateDescription(data, task) {
+    if (data.showDescription && task.description && task.description != "") {
+        var html = ["<div class='infoPanelOuter'>"];
+        html.push("<div class='infoPanel'><div class='infoPanelInner'>" + task.description.replace(/\r\n/g, '<br/>') + "</div></div>");
+        html.push("</div>");
+        return html.join("");
+    }
+}
+
+function generateTestInfo(data, task) {
+    if (data.showTestResults && task.testResults && task.testResults.length > 0) {
+        var html = ["<div class='infoPanelOuter'>"];
+        Q.each(task.testResults, function(i, analysis) {
+            html.push("<div class='infoPanel'><div class='infoPanelInner'>");
+                html.push("<a href=" + rootURL + "/" + analysis.url + ">" + analysis.name + "</a>");
+                html.push("<table id='priority.summary' class='pane'>");
+                html.push("<tbody>");
+                    html.push("<tr>");
+                        html.push("<td class='pane-header'>Total</td>");
+                        html.push("<td class='pane-header'>Failures</td>");
+                        html.push("<td class='pane-header'>Skipped</td>");
+                    html.push("</tr>");
+                html.push("</tbody>");
+                html.push("<tbody>");
+                    html.push("<tr>");
+                        html.push("<td class='pane'>" + analysis.total + "</td>");
+                        html.push("<td class='pane'>" + analysis.failed + "</td>");
+                        html.push("<td class='pane'>" + analysis.skipped + "</td>");
+                    html.push("</tr>");
+                html.push("</tbody>");
+                html.push("</table>");
+            html.push("</div></div>");
+        });
+        html.push("</div>");
+        return html.join("");
+    }
+}
+
+function generateStaticAnalysisInfo(data, task) {
+    if (data.showStaticAnalysisResults && task.staticAnalysisResults && task.staticAnalysisResults.length > 0) {
+        var html = ["<div class='infoPanelOuter'>"];
+        Q.each(task.staticAnalysisResults, function(i, analysis) {
+            html.push("<div class='infoPanel'><div class='infoPanelInner'>");
+                html.push("<a href=" + rootURL + "/" + analysis.url + ">" + analysis.name + "</a>");
+                html.push("<table id='priority.summary' class='pane'>");
+                html.push("<tbody>");
+                    html.push("<tr>");
+                        html.push("<td class='pane-header'>High</td>");
+                        html.push("<td class='pane-header'>Normal</td>");
+                        html.push("<td class='pane-header'>Low</td>");
+                    html.push("</tr>");
+                html.push("</tbody>");
+                html.push("<tbody>");
+                    html.push("<tr>");
+                        html.push("<td class='pane'>" + analysis.high + "</td>");
+                        html.push("<td class='pane'>" + analysis.normal + "</td>");
+                        html.push("<td class='pane'>" + analysis.low + "</td>");
+                    html.push("</tr>");
+                html.push("</tbody>");
+                html.push("</table>");
+            html.push("</div></div>");
+        });
+        html.push("</div>");
+        return html.join("");
+    }
+}
+
+function generatePromotionsInfo(data, task) {
+    if (data.showPromotions && task.status.promoted && task.status.promotions && task.status.promotions.length > 0) {
+        var html = ["<div class='infoPanelOuter'>"];
+        Q.each(task.status.promotions, function(i, promo) {
+            html.push("<div class='infoPanel'><div class='infoPanelInner'>");
+            html.push("<img class='promo-icon' height='16' width='16' src='" + rootURL + promo.icon + "'/>");
+            html.push("<span class='promo-name'><a href='" + rootURL + "/" + task.link + "promotion'>" + htmlEncode(promo.name) + "</a></span><br/>");
+            if (promo.user != 'anonymous') {
+                html.push("<span class='promo-user'>" + promo.user + "</span>");
+            }
+            html.push("<span class='promo-time'>" + formatDuration(promo.time) + "</span><br/>");
+            if (promo.params.length > 0) {
+                html.push("<br/>");
+            }
+            Q.each(promo.params, function (j, param) {
+                html.push(param.replace(/\r\n/g, '<br/>') + "<br />");
+            });
+            html.push("</div></div>");
+        });
+        html.push("</div>");
+        return html.join("");
+    }
+}
+
 function generateChangeLog(changes) {
     var html = ['<div class="changes">'];
     html.push('<h1>Changes:</h1>');
     for (var i = 0; i < changes.length; i++) {
         html.push('<div class="change">');
         var change = changes[i];
-        html.push('<div class="change-author">' + htmlEncode(change.author.name) + '</div>');
+
         if (change.changeLink) {
-            html.push('<div class="change-message"><a href="' + change.changeLink + '">' + htmlEncode(change.message) + '</a></div>');
-        } else {
-            html.push('<div class="change-message">' + htmlEncode(change.message) + '</div>');
+            html.push('<a href="' + change.changeLink + '">');
         }
+
+        html.push('<div class="change-commit-id">' + htmlEncode(change.commitId) + '</div>');
+
+        if (change.changeLink) {
+            html.push('</a>');
+        }
+
+        html.push('<div class="change-author">' + htmlEncode(change.author.name) + '</div>');
+
+        html.push('<div class="change-message">' + change.message + '</div>');
         html.push('</div>');
     }
     html.push('</div>');
@@ -377,10 +488,20 @@ function triggerRebuild(taskId, project, buildId) {
     });
 }
 
-function triggerBuild(url, taskId) {
-    var before = function(xhr){};
+function triggerParameterizedBuild(url, taskId) {
+    console.info("Job is parameterized");
+    window.location.href = rootURL + "/" + url + 'build?delay=0sec';
+}
 
-    console.log(url)
+function triggerBuild(url, taskId) {
+    var before;
+    if (crumb.value != null && crumb.value != "") {
+        console.info("Crumb found and will be added to request header");
+        before = function(xhr){xhr.setRequestHeader(crumb.fieldName, crumb.value);}
+    } else {
+        console.info("Crumb not needed");
+        before = function(xhr){}
+    }
 
     Q.ajax({
         url: rootURL + "/" + url + 'build?delay=0sec',
@@ -395,7 +516,6 @@ function triggerBuild(url, taskId) {
         }
     });
 }
-
 
 function htmlEncode(html) {
     return document.createElement('a')
@@ -421,19 +541,16 @@ function equalheight(container) {
 
         $el = Q(this);
         Q($el).height('auto');
-        topPostion = $el.position().top;
+        topPosition = $el.position().top;
 
         if (currentRowStart != topPostion) {
-            for (currentDiv = 0; currentDiv < rowDivs.length; currentDiv++) {
-                rowDivs[currentDiv].height(currentTallest);
-            }
             rowDivs.length = 0; // empty the array
-            currentRowStart = topPostion;
-            currentTallest = $el.height();
+            currentRowStart = topPosition;
+            currentTallest = $el.height() + 2;
             rowDivs.push($el);
         } else {
             rowDivs.push($el);
-            currentTallest = (currentTallest < $el.height()) ? ($el.height()) : (currentTallest);
+            currentTallest = (currentTallest < $el.height() + 2) ? ($el.height() + 2) : (currentTallest);
         }
         for (currentDiv = 0; currentDiv < rowDivs.length; currentDiv++) {
             rowDivs[currentDiv].height(currentTallest);

@@ -20,13 +20,13 @@ package se.diabol.jenkins.pipeline;
 import hudson.Extension;
 import hudson.model.*;
 import hudson.util.FormValidation;
-import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.export.Exported;
+import se.diabol.jenkins.pipeline.util.JenkinsUtil;
 
 import java.util.HashSet;
 import java.util.List;
@@ -36,14 +36,16 @@ public class PipelineProperty extends JobProperty<AbstractProject<?, ?>> {
 
     private String taskName = null;
     private String stageName = null;
+    private String descriptionTemplate = null;
 
     public PipelineProperty() {
     }
 
     @DataBoundConstructor
-    public PipelineProperty(String taskName, String stageName) {
+    public PipelineProperty(String taskName, String stageName, String descriptionTemplate) {
         setStageName(stageName);
         setTaskName(taskName);
+        setDescriptionTemplate(descriptionTemplate);
     }
 
     @Exported
@@ -56,6 +58,11 @@ public class PipelineProperty extends JobProperty<AbstractProject<?, ?>> {
         return stageName;
     }
 
+    @Exported
+    public String getDescriptionTemplate() {
+        return descriptionTemplate;
+    }
+
     public final void setTaskName(String taskName) {
         this.taskName = taskName;
     }
@@ -64,8 +71,12 @@ public class PipelineProperty extends JobProperty<AbstractProject<?, ?>> {
         this.stageName = stageName;
     }
 
+    public void setDescriptionTemplate(String descriptionTemplate) {
+        this.descriptionTemplate = descriptionTemplate;
+    }
+
     public static Set<String> getStageNames() {
-        List<AbstractProject> projects = Jenkins.getInstance().getAllItems(AbstractProject.class);
+        List<AbstractProject> projects = JenkinsUtil.getInstance().getAllItems(AbstractProject.class);
         Set<String> result = new HashSet<String>();
         for (AbstractProject project : projects) {
             PipelineProperty property = (PipelineProperty) project.getProperty(PipelineProperty.class);
@@ -77,11 +88,10 @@ public class PipelineProperty extends JobProperty<AbstractProject<?, ?>> {
         return result;
     }
 
-
     @Extension
     public static final class DescriptorImpl extends JobPropertyDescriptor {
-    	
-    	@Override
+
+        @Override
         public String getDisplayName() {
             return "Pipeline description";
         }
@@ -125,24 +135,28 @@ public class PipelineProperty extends JobProperty<AbstractProject<?, ?>> {
             return FormValidation.ok();
         }
 
-		@Override
-		public PipelineProperty newInstance(StaplerRequest sr, JSONObject formData) throws FormException {
-			String task = sr.getParameter("taskName");
-			String stage = sr.getParameter("stageName");
-			boolean configEnabled = sr.getParameter("enabled") != null;
-			if (!configEnabled) {
-				return null;
-			}
-			if ("".equals(task)) {
-				task = null;
-			}
-			if ("".equals(stage)) {
-				stage = null;
-			}
-			if (task == null && stage == null) {
-				return null;
-			}
-			return new PipelineProperty(task, stage);
-		}
+        @Override
+        public PipelineProperty newInstance(StaplerRequest sr, JSONObject formData) throws FormException {
+            String task = sr.getParameter("taskName");
+            String stage = sr.getParameter("stageName");
+            String description = sr.getParameter("descriptionTemplate");
+            boolean configEnabled = sr.getParameter("enabled") != null;
+            if (!configEnabled) {
+                return null;
+            }
+            if ("".equals(task)) {
+                task = null;
+            }
+            if ("".equals(stage)) {
+                stage = null;
+            }
+            if ("".equals(description)) {
+                description = null;
+            }
+            if (task == null && stage == null) {
+                return null;
+            }
+            return new PipelineProperty(task, stage, description);
+        }
     }
 }

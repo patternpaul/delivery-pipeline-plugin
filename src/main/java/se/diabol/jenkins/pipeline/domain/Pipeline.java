@@ -18,16 +18,22 @@ If not, see <http://www.gnu.org/licenses/>.
 package se.diabol.jenkins.pipeline.domain;
 
 import com.google.common.collect.ImmutableList;
+
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.ItemGroup;
+
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
+
+import se.diabol.jenkins.pipeline.domain.task.Task;
 import se.diabol.jenkins.pipeline.util.PipelineUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static com.google.common.base.Objects.toStringHelper;
@@ -37,12 +43,13 @@ import static com.google.common.collect.Lists.newArrayList;
 public class Pipeline extends AbstractItem {
 
     private AbstractProject firstProject;
+    private AbstractProject lastProject;
 
     private List<Stage> stages;
 
     private String version;
 
-    private List<Trigger> triggeredBy;
+    private List<TriggerCause> triggeredBy;
     private Set<UserInfo> contributors;
 
     private boolean aggregated;
@@ -51,22 +58,28 @@ public class Pipeline extends AbstractItem {
 
     private List<Change> changes;
 
+    private long totalBuildTime;
 
-    public Pipeline(String name, AbstractProject firstProject, List<Stage> stages) {
+    private Map<String, Task> allTasks = null;
+
+    public Pipeline(String name, AbstractProject firstProject, AbstractProject lastProject, List<Stage> stages) {
         super(name);
         this.firstProject = firstProject;
+        this.lastProject = lastProject;
         this.stages = stages;
     }
 
     public Pipeline(String name,
                     AbstractProject firstProject,
+                    AbstractProject lastProject,
                     String version,
                     String timestamp,
-                    List<Trigger> triggeredBy,
+                    List<TriggerCause> triggeredBy,
                     Set<UserInfo> contributors,
                     List<Stage> stages, boolean aggregated) {
         super(name);
         this.firstProject = firstProject;
+        this.lastProject = lastProject;
         this.version = version;
         this.triggeredBy = triggeredBy;
         this.contributors = contributors;
@@ -114,13 +127,71 @@ public class Pipeline extends AbstractItem {
         return changes;
     }
 
+    @Exported
+    public long getTotalBuildTime() {
+        return totalBuildTime;
+    }
 
+    public void calculateTotalBuildTime() {
+        if (stages.size() == 0) {
+            this.totalBuildTime = 0L;
+        } else {
+            List<Route> allRoutes = new ArrayList<Route>();
+            calculatePipelineRoutes(getStages().get(0).getTasks().get(0), null, allRoutes);
+            long maxTime = 0L;
+            for (Route route : allRoutes) {
+                long buildTime = route.getTotalBuildTime();
+                if (buildTime > maxTime) {
+                    maxTime = buildTime;
+                }
+            }
+            this.totalBuildTime = maxTime;
+        }
+    }
+
+    private Route createRouteAndCopyTasks(final Route route, Task task) {
+        Route currentRoute = new Route();
+        if (route != null) {
+            currentRoute.setTasks(newArrayList(route.getTasks()));
+        }
+        currentRoute.addTask(task);
+        return currentRoute;
+    }
+
+    void calculatePipelineRoutes(Task task, final Route route, List<Route> allRoutes) {
+        if (task.getDownstreamTasks() != null && task.getDownstreamTasks().size() > 0) {
+            for (String downstreamTaskName: task.getDownstreamTasks()) {
+                // assume each task only appears once in the pipeline
+                Route currentRoute = createRouteAndCopyTasks(route, task);
+                calculatePipelineRoutes(getTaskFromName(downstreamTaskName), currentRoute, allRoutes);
+            }
+        } else {
+            Route currentRoute = createRouteAndCopyTasks(route, task);
+            allRoutes.add(currentRoute);
+        }
+    }
+
+    private Task getTaskFromName(String taskName) {
+        if (allTasks == null) {
+            allTasks = new HashMap<String, Task>();
+            for (Stage stage : stages) {
+                for (Task task : stage.getTasks()) {
+                    allTasks.put(task.getId(), task);
+                }
+            }
+        }
+        return allTasks.get(taskName);
+    }
 
     /**
      * Created a pipeline prototype for the supplied first project
      */
+    public static Pipeline extractPipeline(String name, AbstractProject<?, ?> firstProject, AbstractProject<?, ?> lastProject) throws PipelineException {
+        return new Pipeline(name, firstProject, lastProject, newArrayList(Stage.extractStages(firstProject, lastProject)));
+    }
+
     public static Pipeline extractPipeline(String name, AbstractProject<?, ?> firstProject) throws PipelineException {
-        return new Pipeline(name, firstProject, newArrayList(Stage.extractStages(firstProject)));
+        return new Pipeline(name, firstProject, null, newArrayList(Stage.extractStages(firstProject, null)));
     }
 
     public Pipeline createPipelineAggregated(ItemGroup context) {
@@ -128,7 +199,7 @@ public class Pipeline extends AbstractItem {
         for (Stage stage : getStages()) {
             pipelineStages.add(stage.createAggregatedStage(context, firstProject));
         }
-        return new Pipeline(getName(), firstProject, null, null, null, null, pipelineStages, true);
+        return new Pipeline(getName(), firstProject, lastProject, null, null, null, null, pipelineStages, true);
     }
 
     /**
@@ -145,12 +216,9 @@ public class Pipeline extends AbstractItem {
             for (Stage stage : getStages()) {
                 pipelineStages.add(stage.createLatestStage(context, null));
             }
-            Pipeline pipelineLatest = new Pipeline(getName(), firstProject, "#" + firstProject.getNextBuildNumber(), pipeLineTimestamp,
-                    Trigger.getTriggeredBy(firstProject, null), null,
-                    //            Trigger.getTriggeredBy(firstBuild),
-                    //            UserInfo.getContributors(firstBuild),
-                    pipelineStages, false);
-            //pipelineLatest.setChanges(pipelineChanges);
+            Pipeline pipelineLatest = new Pipeline(getName(), firstProject, lastProject, "#"
+                    + firstProject.getNextBuildNumber(), pipeLineTimestamp,
+                    TriggerCause.getTriggeredBy(firstProject, null), null, pipelineStages, false);
             result.add(pipelineLatest);
             no--;
         }
@@ -165,9 +233,11 @@ public class Pipeline extends AbstractItem {
             for (Stage stage : getStages()) {
                 pipelineStages.add(stage.createLatestStage(context, firstBuild));
             }
-            Pipeline pipelineLatest = new Pipeline(getName(), firstProject, firstBuild.getDisplayName(), pipeLineTimestamp,
-                                Trigger.getTriggeredBy(firstProject, firstBuild), UserInfo.getContributors(firstBuild), pipelineStages, false);
+            Pipeline pipelineLatest = new Pipeline(getName(), firstProject, lastProject, firstBuild.getDisplayName(),
+                    pipeLineTimestamp, TriggerCause.getTriggeredBy(firstProject, firstBuild),
+                    UserInfo.getContributors(firstBuild), pipelineStages, false);
             pipelineLatest.setChanges(pipelineChanges);
+            pipelineLatest.calculateTotalBuildTime();
             result.add(pipelineLatest);
         }
         return result;
@@ -184,7 +254,7 @@ public class Pipeline extends AbstractItem {
     }
 
     @Exported
-    public List<Trigger> getTriggeredBy() {
+    public List<TriggerCause> getTriggeredBy() {
         return triggeredBy;
     }
 }

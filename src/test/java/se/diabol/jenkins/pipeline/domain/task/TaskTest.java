@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with Delivery Pipeline Plugin.
 If not, see <http://www.gnu.org/licenses/>.
 */
-package se.diabol.jenkins.pipeline.domain;
+package se.diabol.jenkins.pipeline.domain.task;
 
 import au.com.centrumsystems.hudson.plugin.buildpipeline.trigger.BuildPipelineTrigger;
 import hudson.Launcher;
@@ -27,8 +27,17 @@ import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.model.Result;
+import hudson.model.User;
+import hudson.security.ACL;
+import hudson.security.GlobalMatrixAuthorizationStrategy;
+import hudson.security.Permission;
+import hudson.tasks.BuildTrigger;
 import hudson.util.OneShotEvent;
 import jenkins.model.Jenkins;
+
+import org.acegisecurity.context.SecurityContext;
+import org.acegisecurity.context.SecurityContextHolder;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.Bug;
@@ -36,8 +45,10 @@ import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestBuilder;
 import org.jvnet.hudson.test.UnstableBuilder;
+
 import se.diabol.jenkins.pipeline.DeliveryPipelineView;
 import se.diabol.jenkins.pipeline.PipelineProperty;
+import se.diabol.jenkins.pipeline.domain.task.Task;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -88,6 +99,8 @@ public class TaskTest {
 
     @Test
     public void testGetLatestRunning() throws Exception {
+        final String mockDescription = "some description";
+
         final OneShotEvent buildStarted = new OneShotEvent();
         final OneShotEvent buildBuilding = new OneShotEvent();
 
@@ -104,10 +117,13 @@ public class TaskTest {
 
         project.scheduleBuild2(0);
         buildStarted.block(); // wait for the build to really start
+
+        project.getLastBuild().setDescription(mockDescription);
         Task latest = prototype.getLatestTask(jenkins.getInstance(), project.getLastBuild());
         Task aggregated = prototype.getAggregatedTask(project.getLastBuild(), jenkins.getInstance());
         assertEquals("job/test/1/console", latest.getLink());
         assertTrue(latest.getStatus().isRunning());
+        assertEquals(mockDescription, aggregated.getDescription());
 
         assertEquals("job/test/1/console", aggregated.getLink());
         assertTrue(aggregated.getStatus().isRunning());
@@ -122,7 +138,7 @@ public class TaskTest {
     public void testTaskNameForMultiConfiguration() throws Exception {
         MatrixProject project = jenkins.createMatrixProject("Multi");
         project.setAxes(new AxisList(new Axis("axis", "foo", "bar")));
-        project.addProperty(new PipelineProperty("task", "stage"));
+        project.addProperty(new PipelineProperty("task", "stage", ""));
 
         Collection<MatrixConfiguration> configurations = project.getActiveConfigurations();
 
@@ -175,8 +191,82 @@ public class TaskTest {
         project.scheduleBuild2(0);
         jenkins.waitUntilNoActivity();
         assertTrue(task.getLatestTask(jenkins.getInstance(), project.getLastBuild()).isRebuildable());
+    }
+
+    @Test
+    @Bug(28845)
+    public void testIsRebuildableNoPermission() throws Exception {
+        FreeStyleProject a = jenkins.createFreeStyleProject("A");
+        FreeStyleProject b = jenkins.createFreeStyleProject("B");
+        b.getBuildersList().add(new FailureBuilder());
+        a.getPublishersList().add(new BuildTrigger("B", false));
+        jenkins.setQuietPeriod(0);
+        jenkins.getInstance().rebuildDependencyGraph();
+        FreeStyleBuild firstBuild = jenkins.buildAndAssertSuccess(a);
+        jenkins.waitUntilNoActivity();
+        assertNotNull(b.getLastBuild());
+        assertTrue(b.getLastBuild().getResult().equals(Result.FAILURE));
+
+        jenkins.getInstance().setSecurityRealm(jenkins.createDummySecurityRealm());
+        GlobalMatrixAuthorizationStrategy gmas = new GlobalMatrixAuthorizationStrategy();
+        gmas.add(Permission.READ, "devel");
+        jenkins.getInstance().setAuthorizationStrategy(gmas);
+
+        SecurityContext oldContext = ACL.impersonate(User.get("devel").impersonate());
+
+        Task prototype  = Task.getPrototypeTask(b, false);
+        Task task = prototype.getLatestTask(jenkins.getInstance(), firstBuild);
+        assertNotNull(task);
+        assertFalse(task.isRebuildable());
+
+        SecurityContextHolder.setContext(oldContext);
 
     }
 
+    @Test
+    @Bug(30170)
+    public void testTaskName() throws Exception {
+        testSimplePipelineTaskNames("Build", "Deploy", "Build", "Deploy", "Build", "Deploy");
+    }
+
+    @Test
+    public void testTaskNameMacro() throws Exception {
+        testSimplePipelineTaskNames("Build ${BUILD_NUMBER}", "Deploy ${BUILD_NUMBER}", "Build ...",
+                "Deploy ...", "Build 1", "Deploy 1");
+    }
+
+    @Test
+    public void testTaskNameMacroOnly() throws Exception {
+        testSimplePipelineTaskNames("${BUILD_NUMBER}", "${BUILD_NUMBER}", "...",
+                "...", "1", "1");
+    }
+
+    private void testSimplePipelineTaskNames(String taskNameA, String taskNameB, String expectedBeforeA,
+                                             String expectedBeforeB, String expectedAfterA, String expectedAfterB)
+            throws Exception {
+        FreeStyleProject a = jenkins.createFreeStyleProject("A");
+        FreeStyleProject b = jenkins.createFreeStyleProject("B");
+        a.addProperty(new PipelineProperty(taskNameA, "Stage Build", null));
+        b.addProperty(new PipelineProperty(taskNameB, "Stage Deploy", null));
+
+        a.getPublishersList().add(new BuildTrigger("B", false));
+        jenkins.setQuietPeriod(0);
+        jenkins.getInstance().rebuildDependencyGraph();
+
+        Task taskA = Task.getPrototypeTask(a, true).getLatestTask(jenkins.getInstance(), null);
+        Task taskB = Task.getPrototypeTask(b, false).getLatestTask(jenkins.getInstance(), null);
+
+        assertEquals(expectedBeforeA, taskA.getName());
+        assertEquals(expectedBeforeB, taskB.getName());
+
+        FreeStyleBuild firstBuild = jenkins.buildAndAssertSuccess(a);
+        jenkins.waitUntilNoActivity();
+
+        taskA = Task.getPrototypeTask(a, true).getLatestTask(jenkins.getInstance(), firstBuild);
+        taskB = Task.getPrototypeTask(b, false).getLatestTask(jenkins.getInstance(), firstBuild);
+
+        assertEquals(expectedAfterA, taskA.getName());
+        assertEquals(expectedAfterB, taskB.getName());
+    }
 
 }

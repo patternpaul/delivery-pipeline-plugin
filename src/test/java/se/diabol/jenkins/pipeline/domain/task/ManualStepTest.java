@@ -15,20 +15,22 @@ You should have received a copy of the GNU General Public License
 along with Delivery Pipeline Plugin.
 If not, see <http://www.gnu.org/licenses/>.
 */
-package se.diabol.jenkins.pipeline.domain;
+package se.diabol.jenkins.pipeline.domain.task;
 
 import au.com.centrumsystems.hudson.plugin.buildpipeline.trigger.BuildPipelineTrigger;
 import hudson.model.AbstractBuild;
 import hudson.model.FreeStyleProject;
 import hudson.tasks.BuildTrigger;
+
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.Bug;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockFolder;
-import se.diabol.jenkins.pipeline.DeliveryPipelineView;
 
+import se.diabol.jenkins.pipeline.DeliveryPipelineView;
+import se.diabol.jenkins.pipeline.domain.task.ManualStep;
 import static org.junit.Assert.*;
 
 public class ManualStepTest {
@@ -258,6 +260,31 @@ public class ManualStepTest {
         assertNull(b.getLastBuild());
         step = ManualStep.getManualStepLatest(c, c.getLastBuild(), firstBuild);
         assertNotNull(step);
+
+    }
+
+    @Test
+    @Bug(28937)
+    public void testFailure() throws Exception {
+        FreeStyleProject a = jenkins.createFreeStyleProject("A");
+        FreeStyleProject b = jenkins.createFreeStyleProject("B");
+        FreeStyleProject c = jenkins.createFreeStyleProject("C");
+        a.getPublishersList().add(new BuildPipelineTrigger("B", null));
+        b.getPublishersList().add(new BuildPipelineTrigger("C", null));
+        b.getBuildersList().add(new FailureBuilder());
+        jenkins.getInstance().rebuildDependencyGraph();
+        jenkins.setQuietPeriod(0);
+        AbstractBuild firstBuild = jenkins.buildAndAssertSuccess(a);
+        jenkins.waitUntilNoActivity();
+
+        DeliveryPipelineView view = new DeliveryPipelineView("Pipeline", jenkins.getInstance());
+        view.triggerManual("B", "A", "1");
+
+        jenkins.waitUntilNoActivity();
+
+        ManualStep step = ManualStep.getManualStepLatest(c, null, firstBuild);
+        assertNotNull(step);
+        assertFalse(step.isEnabled());
 
     }
 

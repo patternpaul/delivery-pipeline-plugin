@@ -65,6 +65,13 @@ div.change-author {
     vertical-align: top;
     min-width: 75px;
     display: table-cell;
+    padding-right: 10px;
+}
+
+div.change-commit-id {
+    vertical-align: top;
+    display: table-cell;
+    padding-right: 10px;
 }
 
 div.change-message {
@@ -109,9 +116,8 @@ div.task-content {
 }
 
 div.stage-header {
-    border-bottom: solid 1px #C8C8C8;
-    background: #E8E8E8;
-    font-size: 14px;
+    background: #EEEEEE;
+    font-size: 13px;
     font-weight: bold;
     display: table;
     width: 100%;
@@ -119,7 +125,7 @@ div.stage-header {
 }
 
 .stage-name {
-    padding: 3px 3px 3px 6px;
+    padding: 8px 8px 8px 8px;
     display: table-cell;
     vertical-align: top;
 }
@@ -146,6 +152,7 @@ div.task-manual {
     display: table-cell;
     background: url("play.png") no-repeat;
     background-size: 75%;
+    cursor: pointer;
     height: 14px;
     width: 14px;
     float: right;
@@ -158,6 +165,7 @@ div.task-rebuild {
     background-color: #808080;
     background: url("refresh.png") no-repeat;
     background-size: 75%;
+    cursor: pointer;
     height: 14px;
     width: 14px;
     float: right;
@@ -226,7 +234,6 @@ div.task-progress-running {
 
 .SUCCESS {
     border-left: 6px solid #228b22;
-    background-color: #1bd130;
 }
 
 .UNSTABLE {
@@ -246,7 +253,6 @@ div.task-progress-running {
     background-color: #d3d3d3;
     font-weight: bold;
 }
-
 
 .DISABLED {
     border-left: 6px solid transparent;
@@ -289,4 +295,39 @@ div.pipeline-message {
     z-index: -100;
 }
 
-
+div.infoPanel {
+    display:block;
+    max-width:300px;
+    padding-left:2px;
+    padding-right:2px;
+    margin-top:-2px;
+    border-top:none;
+}
+div.infoPanelInner {
+    padding:8px 4px;
+    overflow: hidden;
+    border: 0;
+}
+div.infoPanelInner a {
+    font-weight: bold;
+}
+div.infoPanelOuter {
+    margin: 4px 2px 4px 4px;
+    border: 1px solid lightgray;
+    background-color: #FAF8F8;
+}
+.MANUALTASK {
+    border-right: 6px solid #FFE4E1;
+}
+.promo-icon {
+    padding-left: 2px;
+}
+.promo-name {
+    padding-left: 6px;
+}
+.promo-user {
+    padding-left: 4px;
+}
+.promo-time {
+    padding-left: 24px;
+}
